@@ -32,20 +32,13 @@ app.post('/download-cv', async (req, res) => {
       apiKey: ANTHROPIC_API_KEY,
     });
 
-    // Use Claude with computer use to download the file
+    // Use Claude to download the file via bash
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
       tools: [
         {
-          type: 'computer_20241022',
-          name: 'computer',
-          display_width_px: 1024,
-          display_height_px: 768,
-          display_number: 1,
-        },
-        {
-          type: 'bash_20241022',
+          type: 'bash_20250124',
           name: 'bash',
         },
       ],
@@ -55,12 +48,12 @@ app.post('/download-cv', async (req, res) => {
           content: `Download the PDF file from this URL: ${url}
           
           Steps:
-          1. Use curl or wget to download the file
-          2. Save it as cv.pdf in /tmp/
-          3. Convert the file to base64
-          4. Return ONLY the base64 string, nothing else
+          1. Use curl -L to download the file (follow redirects)
+          2. Save it as /tmp/cv.pdf
+          3. Convert the file to base64 using: base64 /tmp/cv.pdf
+          4. Return the base64 string
           
-          If the URL requires JavaScript or redirects, try following redirects with curl -L flag.`
+          Important: The URL might redirect to the actual file, so use -L flag with curl.`
         }
       ],
     });
