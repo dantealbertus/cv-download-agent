@@ -56,11 +56,9 @@ app.post('/download-cv', async (req, res) => {
       }
     });
 
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+    await page.goto(url, { waitUntil: 'networkidle2' });
 
+    // Klik download knop
     await page.evaluate(() => {
       const button = Array.from(document.querySelectorAll('button, a'))
         .find(el =>
@@ -71,16 +69,16 @@ app.post('/download-cv', async (req, res) => {
       if (button) button.click();
     });
 
-    await page.waitForResponse(response =>
-      response.headers()['content-type']?.includes('pdf') ||
-      response.headers()['content-disposition']?.includes('attachment'),
-      { timeout: 30000 }
-    );
+    // Wacht maximaal 20 seconden tot buffer gevuld is
+    const start = Date.now();
+    while (!pdfBuffer && Date.now() - start < 20000) {
+      await new Promise(r => setTimeout(r, 500));
+    }
 
     await browser.disconnect();
 
     if (!pdfBuffer) {
-      return res.status(500).json({ error: 'PDF not detected' });
+      return res.status(500).json({ error: 'PDF not detected after click' });
     }
 
     res.set({
