@@ -61,7 +61,6 @@ app.post('/download-cv', async (req, res) => {
       timeout: 30000
     });
 
-    // Klik op de download knop
     await page.evaluate(() => {
       const button = Array.from(document.querySelectorAll('button, a'))
         .find(el =>
@@ -72,22 +71,24 @@ app.post('/download-cv', async (req, res) => {
       if (button) button.click();
     });
 
-    // Wacht even tot response binnenkomt
-    await page.waitForTimeout(5000);
+    await page.waitForResponse(response =>
+      response.headers()['content-type']?.includes('pdf') ||
+      response.headers()['content-disposition']?.includes('attachment'),
+      { timeout: 30000 }
+    );
 
     await browser.disconnect();
 
     if (!pdfBuffer) {
-      return res.json({
-        success: false,
-        message: 'No PDF detected after click'
-      });
+      return res.status(500).json({ error: 'PDF not detected' });
     }
 
-    return res.json({
-      success: true,
-      filesize: pdfBuffer.length
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="cv.pdf"',
     });
+
+    return res.send(pdfBuffer);
 
   } catch (error) {
     if (browser) {
