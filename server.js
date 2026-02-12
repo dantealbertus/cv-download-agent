@@ -24,30 +24,27 @@ app.use((req, res, next) => {
 
 app.post('/download-cv', async (req, res) => {
   try {
-    console.log('DOWNLOAD ROUTE HIT');
-    console.log('Body:', req.body);
-
     const { url } = req.body;
 
     if (!url) {
       return res.status(400).json({ error: 'URL required' });
     }
 
-    // Controleer of URL geldig is
-    let parsedUrl;
-    try {
-      parsedUrl = new URL(url);
-    } catch (e) {
-      return res.status(400).json({ error: 'Invalid URL format' });
-    }
+    const browserWSEndpoint = `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_API_KEY}`;
+
+    const browser = await require('puppeteer-core').connect({
+      browserWSEndpoint
+    });
+
+    await browser.disconnect();
 
     return res.json({
       success: true,
-      receivedUrl: parsedUrl.href
+      message: 'Browserless connection successful'
     });
 
   } catch (error) {
-    console.error('Route error:', error);
+    console.error('Browserless error:', error);
     return res.status(500).json({ error: error.message });
   }
 });
