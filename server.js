@@ -23,10 +23,33 @@ app.use((req, res, next) => {
 ========================= */
 
 app.post('/download-cv', async (req, res) => {
-  console.log('DOWNLOAD ROUTE HIT');
-  console.log('Body:', req.body);
+  try {
+    console.log('DOWNLOAD ROUTE HIT');
+    console.log('Body:', req.body);
 
-  return res.json({ test: true });
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: 'URL required' });
+    }
+
+    // Controleer of URL geldig is
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    return res.json({
+      success: true,
+      receivedUrl: parsedUrl.href
+    });
+
+  } catch (error) {
+    console.error('Route error:', error);
+    return res.status(500).json({ error: error.message });
+  }
 });
 
 /* =========================
