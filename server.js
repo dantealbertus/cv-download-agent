@@ -38,30 +38,23 @@ app.post('/download-cv', async (req, res) => {
     });
 
     const page = await browser.newPage();
-
     await page.goto(url, { waitUntil: 'networkidle2' });
 
-    // Extract de echte S3 download URL
+    // Zoek S3 download link
     const s3Url = await page.evaluate(() => {
-      const link = Array.from(document.querySelectorAll('a'))
-        .find(a =>
-          a.textContent?.toLowerCase().includes('download')
-        );
-
-      return link?.href || null;
+      const link = document.querySelector('a[href*="amazonaws.com"]');
+      return link ? link.href : null;
     });
 
     await browser.disconnect();
 
     if (!s3Url) {
-      return res.status(500).json({ error: 'Download link not found' });
+      return res.status(500).json({ error: 'S3 download link not found' });
     }
 
-    // Direct file downloaden via fetch
     const response = await fetch(s3Url);
-
     if (!response.ok) {
-      return res.status(500).json({ error: 'Failed to download file from S3' });
+      return res.status(500).json({ error: 'Failed to fetch S3 file' });
     }
 
     const buffer = await response.buffer();
