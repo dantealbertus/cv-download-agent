@@ -40,18 +40,26 @@ app.post('/download-cv', async (req, res) => {
 
     const page = await browser.newPage();
 
+    let pdfDetected = false;
+
+    page.on('response', async (response) => {
+      const contentType = response.headers()['content-type'] || '';
+
+      if (contentType.includes('pdf')) {
+        pdfDetected = true;
+      }
+    });
+
     await page.goto(url, {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
 
-    const pageTitle = await page.title();
-
     await browser.disconnect();
 
     return res.json({
       success: true,
-      pageTitle
+      pdfDetected
     });
 
   } catch (error) {
@@ -59,7 +67,7 @@ app.post('/download-cv', async (req, res) => {
       try { await browser.disconnect(); } catch {}
     }
 
-    console.error('Goto error:', error);
+    console.error('PDF detect error:', error);
     return res.status(500).json({ error: error.message });
   }
 });
