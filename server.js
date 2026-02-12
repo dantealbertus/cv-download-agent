@@ -40,13 +40,19 @@ app.post('/download-cv', async (req, res) => {
 
     const page = await browser.newPage();
 
-    let pdfDetected = false;
+    let pdfBuffer = null;
 
     page.on('response', async (response) => {
-      const contentType = response.headers()['content-type'] || '';
+      const headers = response.headers();
+      const contentType = headers['content-type'] || '';
+      const contentDisposition = headers['content-disposition'] || '';
 
-      if (contentType.includes('pdf')) {
-        pdfDetected = true;
+      if (
+        contentType.includes('pdf') ||
+        contentType.includes('octet-stream') ||
+        contentDisposition.includes('attachment')
+      ) {
+        pdfBuffer = await response.buffer();
       }
     });
 
@@ -55,11 +61,32 @@ app.post('/download-cv', async (req, res) => {
       timeout: 30000
     });
 
+    // Klik op de download knop
+    await page.evaluate(() => {
+      const button = Array.from(document.querySelectorAll('button, a'))
+        .find(el =>
+          el.textContent?.toLowerCase().includes('download') &&
+          el.offsetParent !== null
+        );
+
+      if (button) button.click();
+    });
+
+    // Wacht even tot response binnenkomt
+    await page.waitForTimeout(5000);
+
     await browser.disconnect();
+
+    if (!pdfBuffer) {
+      return res.json({
+        success: false,
+        message: 'No PDF detected after click'
+      });
+    }
 
     return res.json({
       success: true,
-      pdfDetected
+      filesize: pdfBuffer.length
     });
 
   } catch (error) {
@@ -67,7 +94,7 @@ app.post('/download-cv', async (req, res) => {
       try { await browser.disconnect(); } catch {}
     }
 
-    console.error('PDF detect error:', error);
+    console.error('Download error:', error);
     return res.status(500).json({ error: error.message });
   }
 });
