@@ -19,6 +19,17 @@ app.use((req, res, next) => {
 });
 
 /* =========================
+   TEST DOWNLOAD ROUTE
+========================= */
+
+app.post('/download-cv', async (req, res) => {
+  console.log('DOWNLOAD ROUTE HIT');
+  console.log('Body:', req.body);
+
+  return res.json({ test: true });
+});
+
+/* =========================
    ENV CONFIG
 ========================= */
 
