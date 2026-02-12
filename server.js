@@ -1,14 +1,26 @@
+const express = require('express');
+const puppeteer = require('puppeteer-core');
+const { google } = require('googleapis');
+const { Readable } = require('stream');
+
+const app = express();
+
+/* =========================
+   MIDDLEWARE
+========================= */
+
+// Body parser (belangrijk voor Make)
+app.use(express.json({ limit: '10mb' }));
+
+// Debug logging
 app.use((req, res, next) => {
   console.log('Incoming request:', req.method, req.url);
   next();
 });
 
-const express = require('express');
-const puppeteer = require('puppeteer-core');
-const { google } = require('googleapis');
-
-const app = express();
-app.use(express.json());
+/* =========================
+   ENV CONFIG
+========================= */
 
 const PORT = process.env.PORT || 3000;
 const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
@@ -17,11 +29,13 @@ const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET;
 const OAUTH_REDIRECT_URI = process.env.OAUTH_REDIRECT_URI;
 const BROWSERLESS_API_KEY = process.env.BROWSERLESS_API_KEY;
 
-// Store tokens in memory
+/* =========================
+   OAUTH SETUP
+========================= */
+
 let oauth2Client = null;
 let tokensStore = null;
 
-// Initialize OAuth2 client
 function getOAuth2Client() {
   if (!oauth2Client) {
     oauth2Client = new google.auth.OAuth2(
@@ -37,14 +51,17 @@ function getOAuth2Client() {
   return oauth2Client;
 }
 
+/* =========================
+   ROUTES
+========================= */
+
 // Health check
 app.get('/', (req, res) => {
   const isAuthorized = tokensStore !== null;
   const browserlessConfigured = !!BROWSERLESS_API_KEY;
-  
-  res.json({ 
-    status: 'ok', 
-    message: 'CV Download Agent v2.3 - Browserless.io',
+
+  res.json({
+    status: 'ok',
     version: '2.3.0',
     authorized: isAuthorized,
     browserless: browserlessConfigured,
@@ -52,21 +69,23 @@ app.get('/', (req, res) => {
   });
 });
 
-// OAuth authorization
+// OAuth start
 app.get('/auth', (req, res) => {
   const client = getOAuth2Client();
+
   const authUrl = client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/drive.file'],
     prompt: 'consent'
   });
+
   res.redirect(authUrl);
 });
 
 // OAuth callback
 app.get('/oauth/callback', async (req, res) => {
   const { code } = req.query;
-  
+
   if (!code) {
     return res.status(400).send('No authorization code');
   }
@@ -74,70 +93,66 @@ app.get('/oauth/callback', async (req, res) => {
   try {
     const client = getOAuth2Client();
     const { tokens } = await client.getToken(code);
+
     tokensStore = tokens;
     client.setCredentials(tokens);
-    console.log('OAuth tokens stored');
-    
-    res.send(`
-      <html>
-        <body style="font-family: Arial; padding: 50px; text-align: center;">
-          <h1>✅ Authorization Successful!</h1>
-          <p>CV Download Agent is connected to Google Drive.</p>
-          <a href="/">Back to Home</a>
-        </body>
-      </html>
-    `);
+
+    res.send('Authorization successful. You can close this window.');
   } catch (error) {
     console.error('OAuth error:', error);
     res.status(500).send('Authorization failed: ' + error.message);
   }
 });
 
-// Main download endpoint
+// Debug endpoint
+app.post('/ping', (req, res) => {
+  res.json({ ok: true, body: req.body });
+});
+
+/* =========================
+   MAIN DOWNLOAD ENDPOINT
+========================= */
+
 app.post('/download-cv', async (req, res) => {
   let browser = null;
-  
+
   try {
     const { url } = req.body;
-    
+
     if (!url) {
       return res.status(400).json({ error: 'URL required' });
     }
 
     if (!tokensStore) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Not authorized. Visit /auth',
         authUrl: `${req.protocol}://${req.get('host')}/auth`
       });
     }
 
     if (!BROWSERLESS_API_KEY) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Browserless API key not configured'
       });
     }
 
     console.log('Download request:', url);
 
-    // Connect to Browserless
     const browserWSEndpoint = `wss://chrome.browserless.io?token=${BROWSERLESS_API_KEY}`;
-    
-    console.log('Connecting to Browserless...');
+
     browser = await puppeteer.connect({
       browserWSEndpoint
     });
 
     const page = await browser.newPage();
 
-    console.log('Navigating...');
-    await page.goto(url, { 
+    await page.goto(url, {
       waitUntil: 'networkidle2',
-      timeout: 30000 
+      timeout: 30000
     });
 
     await page.waitForTimeout(2000);
 
-    // Set up PDF download listener
     const pdfPromise = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Download timeout'));
@@ -146,14 +161,13 @@ app.post('/download-cv', async (req, res) => {
       page.on('response', async (response) => {
         const contentType = response.headers()['content-type'] || '';
         const contentDisposition = response.headers()['content-disposition'] || '';
-        
-        if (contentType.includes('pdf') || 
-            contentType.includes('octet-stream') ||
-            contentDisposition.includes('attachment')) {
-          
-          console.log('PDF detected:', response.url());
+
+        if (
+          contentType.includes('pdf') ||
+          contentType.includes('octet-stream') ||
+          contentDisposition.includes('attachment')
+        ) {
           clearTimeout(timeout);
-          
           try {
             const buffer = await response.buffer();
             resolve(buffer);
@@ -164,48 +178,30 @@ app.post('/download-cv', async (req, res) => {
       });
     });
 
-    // Trigger download
-    console.log('Triggering download...');
+    // Try clicking download button
     try {
-      const downloadElement = await page.evaluateHandle(() => {
-        const elements = Array.from(document.querySelectorAll('*'));
-        return elements.find(el => {
-          const text = el.textContent?.toLowerCase() || '';
-          return text.includes('download') && 
-                 (el.tagName === 'BUTTON' || el.tagName === 'A') &&
-                 el.offsetParent !== null;
-        });
+      await page.evaluate(() => {
+        const elements = Array.from(document.querySelectorAll('button, a'));
+        const target = elements.find(el =>
+          el.textContent?.toLowerCase().includes('download') &&
+          el.offsetParent !== null
+        );
+        if (target) target.click();
       });
-
-      const hasElement = await downloadElement.evaluate(el => el !== null);
-      if (hasElement) {
-        await downloadElement.click();
-      } else {
-        await page.evaluate(() => {
-          const buttons = document.querySelectorAll('button, a');
-          const visible = Array.from(buttons).find(b => b.offsetParent !== null);
-          if (visible) visible.click();
-        });
-      }
     } catch (e) {
-      console.log('Click error:', e.message);
+      console.log('Click attempt failed:', e.message);
     }
 
     const pdfBuffer = await pdfPromise;
-    console.log(`PDF downloaded: ${pdfBuffer.length} bytes`);
 
-    // Extract filename
-    const urlParams = new URL(url);
-    let filename = urlParams.searchParams.get('filename') || 'cv.pdf';
+    const parsedUrl = new URL(url);
+    let filename = parsedUrl.searchParams.get('filename') || 'cv.pdf';
     if (!filename.endsWith('.pdf')) filename += '.pdf';
 
-    // Upload to Drive
     let driveFileUrl = null;
     let driveFileId = null;
 
     if (GOOGLE_DRIVE_FOLDER_ID) {
-      console.log('Uploading to Drive...');
-      
       const client = getOAuth2Client();
       const drive = google.drive({ version: 'v3', auth: client });
 
@@ -216,53 +212,54 @@ app.post('/download-cv', async (req, res) => {
         },
         media: {
           mimeType: 'application/pdf',
-          body: require('stream').Readable.from(pdfBuffer),
+          body: Readable.from(pdfBuffer),
         },
         fields: 'id, webViewLink',
       });
 
       driveFileId = file.data.id;
       driveFileUrl = file.data.webViewLink;
-      console.log('Uploaded:', driveFileUrl);
     }
 
     await browser.disconnect();
-    browser = null;
 
     res.json({
       success: true,
-      filename: filename,
+      filename,
       filesize: pdfBuffer.length,
       base64: pdfBuffer.toString('base64'),
       mimeType: 'application/pdf',
-      googleDrive: driveFileUrl ? {
-        fileId: driveFileId,
-        viewUrl: driveFileUrl,
-        uploaded: true
-      } : {
-        uploaded: false,
-        reason: 'Folder not configured'
-      }
+      googleDrive: driveFileUrl
+        ? {
+            fileId: driveFileId,
+            viewUrl: driveFileUrl,
+            uploaded: true
+          }
+        : {
+            uploaded: false,
+            reason: 'Folder not configured'
+          }
     });
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Download error:', error);
+
     if (browser) {
       try {
         await browser.disconnect();
-      } catch (e) {
-        console.error('Browser disconnect error:', e);
-      }
+      } catch {}
     }
-    res.status(500).json({ 
+
+    res.status(500).json({
       error: error.message
     });
   }
 });
 
+/* =========================
+   START SERVER
+========================= */
+
 app.listen(PORT, () => {
-  console.log(`CV Agent v2.3 (Browserless) on port ${PORT}`);
-  console.log(`Browserless: ${BROWSERLESS_API_KEY ? 'Configured' : 'Missing'}`);
-  console.log(`OAuth: ${OAUTH_CLIENT_ID ? 'Configured' : 'Missing'}`);
-  console.log(`Tokens: ${tokensStore ? 'Stored' : 'Not stored'}`);
+  console.log(`CV Agent running on port ${PORT}`);
 });
