@@ -38,19 +38,20 @@ app.post('/download-cv', async (req, res) => {
     });
 
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle2' });
 
-    // Zoek S3 download link
-    const s3Url = await page.evaluate(() => {
-      const link = document.querySelector('a[href*="amazonaws.com"]');
-      return link ? link.href : null;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+    // Wacht tot S3 link in DOM verschijnt
+    await page.waitForSelector('a[href*="amazonaws.com"]', {
+      timeout: 15000
     });
 
-    await browser.disconnect();
+    const s3Url = await page.$eval(
+      'a[href*="amazonaws.com"]',
+      el => el.href
+    );
 
-    if (!s3Url) {
-      return res.status(500).json({ error: 'S3 download link not found' });
-    }
+    await browser.disconnect();
 
     const response = await fetch(s3Url);
     if (!response.ok) {
