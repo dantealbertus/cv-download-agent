@@ -22,6 +22,8 @@ app.use((req, res, next) => {
    TEST DOWNLOAD ROUTE
 ========================= */
 
+const fetch = require('node-fetch');
+
 app.post('/download-cv', async (req, res) => {
   let browser;
 
@@ -37,65 +39,46 @@ app.post('/download-cv', async (req, res) => {
 
     const page = await browser.newPage();
 
-    let pdfBuffer = null;
-
-    // Luister naar alle responses
-    page.on('response', async (response) => {
-      try {
-        const headers = response.headers();
-        const contentType = headers['content-type'] || '';
-        const contentDisposition = headers['content-disposition'] || '';
-
-        if (
-          contentType.includes('pdf') ||
-          contentType.includes('octet-stream') ||
-          contentDisposition.includes('attachment')
-        ) {
-          pdfBuffer = await response.buffer();
-        }
-      } catch (e) {}
-    });
-
     await page.goto(url, { waitUntil: 'networkidle2' });
 
-    // Klik download knop
-    await page.evaluate(() => {
-      const button = Array.from(document.querySelectorAll('button, a'))
-        .find(el =>
-          el.textContent?.toLowerCase().includes('download') &&
-          el.offsetParent !== null
+    // Extract de echte S3 download URL
+    const s3Url = await page.evaluate(() => {
+      const link = Array.from(document.querySelectorAll('a'))
+        .find(a =>
+          a.textContent?.toLowerCase().includes('download')
         );
 
-      if (button) button.click();
+      return link?.href || null;
     });
-
-    // Wacht maximaal 25 seconden tot buffer gevuld is
-    const maxWait = 25000;
-    const start = Date.now();
-
-    while (!pdfBuffer && Date.now() - start < maxWait) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
 
     await browser.disconnect();
 
-    if (!pdfBuffer) {
-      return res.status(500).json({ error: 'PDF not detected after click' });
+    if (!s3Url) {
+      return res.status(500).json({ error: 'Download link not found' });
     }
+
+    // Direct file downloaden via fetch
+    const response = await fetch(s3Url);
+
+    if (!response.ok) {
+      return res.status(500).json({ error: 'Failed to download file from S3' });
+    }
+
+    const buffer = await response.buffer();
 
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': 'attachment; filename="cv.pdf"',
     });
 
-    return res.send(pdfBuffer);
+    return res.send(buffer);
 
   } catch (error) {
     if (browser) {
       try { await browser.disconnect(); } catch {}
     }
 
-    console.error('Download error:', error);
+    console.error(error);
     return res.status(500).json({ error: error.message });
   }
 });
