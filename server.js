@@ -23,6 +23,8 @@ app.use((req, res, next) => {
 ========================= */
 
 app.post('/download-cv', async (req, res) => {
+  let browser;
+
   try {
     const { url } = req.body;
 
@@ -32,19 +34,32 @@ app.post('/download-cv', async (req, res) => {
 
     const browserWSEndpoint = `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_API_KEY}`;
 
-    const browser = await require('puppeteer-core').connect({
+    browser = await require('puppeteer-core').connect({
       browserWSEndpoint
     });
+
+    const page = await browser.newPage();
+
+    await page.goto(url, {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+
+    const pageTitle = await page.title();
 
     await browser.disconnect();
 
     return res.json({
       success: true,
-      message: 'Browserless connection successful'
+      pageTitle
     });
 
   } catch (error) {
-    console.error('Browserless error:', error);
+    if (browser) {
+      try { await browser.disconnect(); } catch {}
+    }
+
+    console.error('Goto error:', error);
     return res.status(500).json({ error: error.message });
   }
 });
