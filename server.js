@@ -37,45 +37,65 @@ app.post('/download-cv', async (req, res) => {
 
     const page = await browser.newPage();
 
+    let pdfBuffer = null;
+
+    // Luister naar alle responses
+    page.on('response', async (response) => {
+      try {
+        const headers = response.headers();
+        const contentType = headers['content-type'] || '';
+        const contentDisposition = headers['content-disposition'] || '';
+
+        if (
+          contentType.includes('pdf') ||
+          contentType.includes('octet-stream') ||
+          contentDisposition.includes('attachment')
+        ) {
+          pdfBuffer = await response.buffer();
+        }
+      } catch (e) {}
+    });
+
     await page.goto(url, { waitUntil: 'networkidle2' });
 
     // Klik download knop
-    await Promise.all([
-      page.waitForNavigation({ timeout: 30000 }),
-      page.evaluate(() => {
-        const button = Array.from(document.querySelectorAll('button, a'))
-          .find(el =>
-            el.textContent?.toLowerCase().includes('download') &&
-            el.offsetParent !== null
-          );
-        if (button) button.click();
-      })
-    ]);
+    await page.evaluate(() => {
+      const button = Array.from(document.querySelectorAll('button, a'))
+        .find(el =>
+          el.textContent?.toLowerCase().includes('download') &&
+          el.offsetParent !== null
+        );
 
-    // Nieuwe URL na redirect
-    const finalUrl = page.url();
+      if (button) button.click();
+    });
+
+    // Wacht maximaal 25 seconden tot buffer gevuld is
+    const maxWait = 25000;
+    const start = Date.now();
+
+    while (!pdfBuffer && Date.now() - start < maxWait) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     await browser.disconnect();
 
-    // Nu gewone fetch gebruiken (zonder puppeteer)
-    const fetch = require('node-fetch');
-
-    const response = await fetch(finalUrl);
-    const buffer = await response.buffer();
+    if (!pdfBuffer) {
+      return res.status(500).json({ error: 'PDF not detected after click' });
+    }
 
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': 'attachment; filename="cv.pdf"',
     });
 
-    return res.send(buffer);
+    return res.send(pdfBuffer);
 
   } catch (error) {
     if (browser) {
       try { await browser.disconnect(); } catch {}
     }
 
-    console.error(error);
+    console.error('Download error:', error);
     return res.status(500).json({ error: error.message });
   }
 });
